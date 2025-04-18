@@ -2,7 +2,20 @@
 
 #include <Arduino.h>
 #include <SPI.h>
+#include <HardwareSerial.h>
+#include "NMEAParser.h"
 
+// Set the RX and TX pins for the GPS module
+#define RXD2 22
+#define TXD2 27
+// Set the baud rate for the GPS module
+#define GPS_BAUD 9600
+// Create a instance of the HardwareSerial class
+HardwareSerial gpsSerial(2);
+NMEAParser gpsParser;
+bool nmeaSentenceComplete = false;
+
+String nmeaBuffer = "";
 
 // include the installed "TFT_eSPI" library by Bodmer to interface with the TFT Display - https://github.com/Bodmer/TFT_eSPI
 #include <TFT_eSPI.h>
@@ -147,37 +160,13 @@ void logTouchData(int posX, int posY, int pressure)
   Serial.println();
 }
 
-void displayTouchData(int posX, int posY, int pressure)
-{
-  // Clear TFT screen
-  tft.fillScreen(TFT_BLACK);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-
-  // Draw text
-  int textY = 100;
-  String text = "X = " + String(posX) + "Y = " + String(posY);
-  tft.drawCentreString(text, centerX, textY, FONT_SIZE);
-
-  textY += 20;
-  text = "Pressure = " + String(pressure);
-  tft.drawCentreString(text, centerX, textY, FONT_SIZE);
-
-  tft.drawCentreString("Kafkar.com", centerX, 200, FONT_SIZE);
-
-  // Draw touch box
-  tft.drawRect(20, 20, 280, 200, TFT_BLUE);
-
-  tft.drawRect(50, 50, 10, 10, TFT_BLUE);
-  tft.drawRect(260, 50, 10, 10, TFT_BLUE);
-  tft.drawRect(50, 180, 10, 10, TFT_BLUE);
-  tft.drawRect(260, 180, 10, 10, TFT_BLUE);
-
-  tft.fillSmoothCircle(posX, posY, pressure/200, TFT_RED);
-}
 
 void setup()
 {
   Serial.begin(115200);
+
+  // Start the GPS module
+  gpsSerial.begin(GPS_BAUD, SERIAL_8N1, RXD2, TXD2);
 
   // Start the touchscreen component and init the touchscreen
   touchscreenSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
@@ -202,7 +191,7 @@ void setup()
   centerY = SCREEN_HEIGHT / 2;
 
   tft.drawCentreString("Hello, Kafkar.com!", centerX, 30, FONT_SIZE);
-  tft.drawCentreString("Touchscreen to test", centerX, 200, FONT_SIZE);
+  tft.drawCentreString("GPS/GNSS test", centerX, 200, FONT_SIZE);
 
   int x = (tft.width() - 116) / 2;
   int y = (tft.height() - 110) / 2;
@@ -211,8 +200,95 @@ void setup()
   tft.drawBitmap(x, y, bitmap_kafkar_logo, 116, 100, TFT_WHITE);
 }
 
+void updateGPSDisplay(NMEAParser& parser) {
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  
+  // Static variables to store previous values for comparison
+  static double prevLat = 0.0;
+  static double prevLon = 0.0;
+  static double prevSpeed = 0.0;
+  static double prevCourse = 0.0;
+  static int prevSats = 0;
+  static String prevTime = "";
+  
+  // Get current values
+  double currentLat = parser.getLatitude();
+  double currentLon = parser.getLongitude();
+  double currentSpeed = parser.getSpeed() * 1.852; // Convert knots to km/h
+  double currentCourse = parser.getCourse();
+  int currentSats = parser.getSatellites();
+  String currentTime = parser.getTimeString().c_str();
+  
+   // Print parsed values to serial port
+   Serial.println("\n----- GPS Data -----");
+   Serial.print("Time: "); Serial.println(currentTime);
+   Serial.print("Latitude: "); Serial.println(currentLat, 6);
+   Serial.print("Longitude: "); Serial.println(currentLon, 6);
+   Serial.print("Speed: "); Serial.print(currentSpeed, 1); Serial.println(" km/h");
+   Serial.print("Course: "); Serial.print(currentCourse, 1); Serial.println("°");
+   Serial.print("Satellites: "); Serial.println(currentSats);
+   Serial.println("-------------------");
+   
+  // Update satellite count if changed
+  if (currentSats != prevSats) {
+    tft.fillRect(120, 50, 100, 20, TFT_BLACK); // Clear previous value area
+    tft.drawString(String(currentSats), 120, 50, FONT_SIZE);
+    prevSats = currentSats;
+  }
+  
+  // Update latitude if changed
+  if (currentLat != prevLat) {
+    tft.fillRect(60, 70, 200, 20, TFT_BLACK); // Clear previous value area
+    tft.drawString(String(currentLat, 6), 60, 70, FONT_SIZE);
+    prevLat = currentLat;
+  }
+  
+  // Update longitude if changed
+  if (currentLon != prevLon) {
+    tft.fillRect(60, 90, 200, 20, TFT_BLACK); // Clear previous value area
+    tft.drawString(String(currentLon, 6), 60, 90, FONT_SIZE);
+    prevLon = currentLon;
+  }
+  
+  // Update speed if changed
+  if (currentSpeed != prevSpeed) {
+    tft.fillRect(80, 110, 120, 20, TFT_BLACK); // Clear previous value area
+    tft.drawString(String(currentSpeed, 1) + " km/h", 80, 110, FONT_SIZE);
+    prevSpeed = currentSpeed;
+  }
+  
+  // Update course if changed
+  if (currentCourse != prevCourse) {
+    tft.fillRect(90, 130, 100, 20, TFT_BLACK); // Clear previous value area
+    tft.drawString(String(currentCourse, 1) + "°", 90, 130, FONT_SIZE);
+    prevCourse = currentCourse;
+  }
+  
+  // Update time if changed
+  if (currentTime != prevTime && currentTime.length() > 0) {
+    tft.fillRect(60, 150, 100, 20, TFT_BLACK); // Clear previous value area
+    tft.drawString(currentTime, 60, 150, FONT_SIZE);
+    prevTime = currentTime;
+  }
+  
+  // Draw static labels only once during first call
+  static bool firstRun = true;
+  if (firstRun) {
+    tft.fillRect(0, 50, SCREEN_WIDTH, 150, TFT_BLACK); // Clear entire data area
+    tft.drawString("Satellites:", 10, 50, FONT_SIZE);
+    tft.drawString("Lat:", 10, 70, FONT_SIZE);
+    tft.drawString("Lon:", 10, 90, FONT_SIZE);
+    tft.drawString("Speed:", 10, 110, FONT_SIZE);
+    tft.drawString("Course:", 10, 130, FONT_SIZE);
+    tft.drawString("Time:", 10, 150, FONT_SIZE);
+    firstRun = false;
+  }
+}
+
 void loop()
 {
+  static unsigned long lastUpdate = 0;
+  
   // Checks if Touchscreen is touched
   if (touchscreen.tirqTouched() && touchscreen.touched())
   {
@@ -222,10 +298,41 @@ void loop()
     posX = map(p.x, 200, 3700, 1, SCREEN_WIDTH);
     posY = map(p.y, 240, 3800, 1, SCREEN_HEIGHT);
     pressure = p.z;
-
-    logTouchData(posX, posY, pressure);
-    displayTouchData(posX, posY, pressure);
+    // logTouchData(posX, posY, pressure);
 
     delay(100);
+  }
+
+  // Read GPS data from Serial2 (UART2)
+  while (gpsSerial.available() > 0) {
+    // get the byte data from the GPS
+    char gpsData = gpsSerial.read();
+    
+    // Process the GPS data with our parser
+    if (nmeaSentenceComplete) {
+      for (unsigned int i = 0; i < nmeaBuffer.length(); i++) {
+        gpsParser.processGPSData(nmeaBuffer[i]);
+      }
+      nmeaBuffer = "";
+      nmeaSentenceComplete = false;
+      
+      // Update display every 500ms
+      if (millis() - lastUpdate > 500) {
+        updateGPSDisplay(gpsParser);
+        lastUpdate = millis();
+      }
+    }
+    
+    // Collect NMEA data
+    nmeaBuffer += gpsData;
+    
+    // Check for end of NMEA sentence
+    if (gpsData == '\n') {
+      nmeaSentenceComplete = true;
+      Serial.println(gpsData);
+    }
+    
+    // Echo to serial monitor for debugging
+    Serial.print(gpsData);
   }
 }
