@@ -177,27 +177,40 @@ void NMEAParser::parseRMC(String sentence) {
 }
 
 void NMEAParser::parseGSA(String sentence) {
-    // $GPGSA,mode,fixType,satellites used...,PDOP,HDOP,VDOP*checksum
-    
-    // This function would parse GSA sentences for more detailed satellite info
-    // For now, we'll just extract HDOP as a simple implementation
-    
+    // Example: $GPGSA,A,3,04,05,09,12,,,,,,,2.6,1.6,2.1*39
+    // Fields:
+    // 0: $GPGSA
+    // 1: Selection mode (A=Manual, M=Automatic)
+    // 2: Fix dimension (1=Fix not available, 2=2D fix, 3=3D fix)
+    // 3-14: PRNs of satellites used for fix (up to 12)
+    // 15: Position dilution of precision (PDOP)
+    // 16: Horizontal dilution of precision (HDOP)
+    // 17: Vertical dilution of precision (VDOP)
+    // 18: Checksum
+ 
     // Split the sentence into fields
     int commaIndex = 0;
     int nextCommaIndex = 0;
     
-    // Skip to the HDOP field (15th field)
+    // Skip to the PDOP field (15th field)
     for (int i = 0; i < 15; i++) {
         commaIndex = sentence.indexOf(',', commaIndex + 1);
         if (commaIndex == -1) return; // Not enough fields
     }
     
+    // Get PDOP
     nextCommaIndex = sentence.indexOf(',', commaIndex + 1);
-    if (nextCommaIndex == -1) {
-        // Last field might end with * instead of ,
-        nextCommaIndex = sentence.indexOf('*', commaIndex + 1);
+    if (nextCommaIndex > commaIndex + 1) {
+        String pdopStr = sentence.substring(commaIndex + 1, nextCommaIndex);
+        if (pdopStr.length() > 0) {
+            pdop = pdopStr.toFloat();
+            validPDOP = true;
+        }
     }
+    commaIndex = nextCommaIndex;
     
+    // Get HDOP
+    nextCommaIndex = sentence.indexOf(',', commaIndex + 1);
     if (nextCommaIndex > commaIndex + 1) {
         String hdopStr = sentence.substring(commaIndex + 1, nextCommaIndex);
         if (hdopStr.length() > 0) {
@@ -205,8 +218,18 @@ void NMEAParser::parseGSA(String sentence) {
             validHDOP = true;
         }
     }
+    commaIndex = nextCommaIndex;
+    
+    // Get VDOP
+    nextCommaIndex = sentence.indexOf('*', commaIndex + 1);
+    if (nextCommaIndex > commaIndex + 1) {
+        String vdopStr = sentence.substring(commaIndex + 1, nextCommaIndex);
+        if (vdopStr.length() > 0) {
+            vdop = vdopStr.toFloat();
+            validVDOP = true;
+        }
+    }
 }
-
 float NMEAParser::convertToDecimalDegrees(String pos, char dir) {
     // NMEA format: DDMM.MMMM
     // Need to convert to decimal degrees: DD.DDDDDD
@@ -348,18 +371,19 @@ int NMEAParser::getSatelliteInfo(SatelliteInfo* satArray, int maxCount) {
 }
 
 float NMEAParser::getVDOP() {
-    // Placeholder - would parse GSA sentence for VDOP
-    return 0.0;
+    return vdop;
+}
+
+bool NMEAParser::hasVDOP() {
+    return validVDOP;
 }
 
 float NMEAParser::getPDOP() {
-    // Placeholder - would parse GSA sentence for PDOP
-    return 0.0;
+    return pdop;
 }
 
-float NMEAParser::getGeoidSeparation() {
-    // Placeholder - would parse GGA sentence for geoid separation
-    return 0.0;
+bool NMEAParser::hasPDOP() {
+    return validPDOP;
 }
 
 String NMEAParser::getFixTypeString() {
